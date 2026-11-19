@@ -1,0 +1,8 @@
+# Copy to .dev.vars for local development. Never commit .dev.vars.
+# Google secure cookies require HTTPS for end-to-end sign-in; use staging for OAuth QA.
+GOOGLE_CLIENT_ID=""
+GOOGLE_CLIENT_SECRET=""
+SECURITY_SECRET=""
+ACCESS_TEAM_DOMAIN=""
+ACCESS_AUD=""
+ADMIN_EMAILS=""

@@ -1,0 +1,16 @@
+{
+  "name": "recall-retention-submission-local",
+  "main": "retention.js",
+  "compatibility_date": "2026-11-16",
+  "workers_dev": false,
+  "triggers": {
+    "crons": ["17 3 * * *"],
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "recall-fieldnotes-submission-local",
+      "database_id": "local",
+    },
+  ],
+}

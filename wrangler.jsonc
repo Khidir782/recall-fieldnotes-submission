@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "recall-fieldnotes-submission-local",
+  "pages_build_output_dir": "dist",
+  "compatibility_date": "2026-11-16",
+  "vars": {
+    "APP_ORIGIN": "http://localhost:8788",
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "recall-fieldnotes-submission-local",
+      "database_id": "local",
+      "migrations_dir": "migrations",
+    },
+  ],
+}
