@@ -32,11 +32,16 @@ function artifact() {
     featureVersion: FEATURE_VERSION,
     featureNames: FEATURE_NAMES,
     algorithm: "standardized_logistic_regression",
-    target: "recall_at_least_2_of_3",
+    target: "recall_at_least_two_thirds",
     dataKind: "observed",
     modelId: "task-123456abcdef",
     trainedAt: "2026-11-16T00:00:00Z",
     conditions: ["quiet", "interruptions", "delay", "cues"],
+    difficultyLevels: [1, 2, 3, 4],
+    supportedTasks: ["quiet", "interruptions", "delay", "cues"].flatMap(
+      (condition) =>
+        [1, 2, 3, 4].map((difficultyLevel) => ({ condition, difficultyLevel })),
+    ),
     coefficients: FEATURE_NAMES.map(() => 0),
     mean: FEATURE_NAMES.map(() => 0),
     scale: FEATURE_NAMES.map(() => 1),
@@ -162,6 +167,15 @@ test("portable logistic inference applies training scaling and remains finite at
     Math.abs(
       inferTaskModel(m, [], "quiet").probability - 1 / (1 + Math.exp(-1)),
     ) < 1e-12,
+  );
+  assert.equal(
+    inferTaskModel(
+      { ...m, supportedTasks: [{ condition: "quiet", difficultyLevel: 1 }] },
+      [],
+      "quiet",
+      4,
+    ),
+    null,
   );
   m.intercept = -10000;
   assert.equal(inferTaskModel(m, [], "quiet").probability, 0);

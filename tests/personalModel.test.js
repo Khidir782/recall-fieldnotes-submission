@@ -152,7 +152,7 @@ test("scheduler is coverage constrained and learns rather than using fixed penal
   const next = recommendPersonal(ts);
   assert.notEqual(next.condition, "interruptions");
   assert.ok(next.uncertaintyReduction > 0);
-  assert.equal(LEARNER_VERSION, "neuroarc-personal-beta-v1");
+  assert.equal(LEARNER_VERSION, "neuroarc-personal-beta-v2");
 });
 
 test("export/import restores learned state without accepting manufactured live metrics", async () => {

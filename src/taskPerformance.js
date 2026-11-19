@@ -1,7 +1,13 @@
+import {
+  difficultyLevel,
+  difficultySettings,
+  itemCount,
+  taskSuccess,
+} from "./difficulty.js";
 import { importSession, sessionExport } from "./experiment.js";
 
-export const FEATURE_VERSION = "neuroarc-task-features-v1";
-export const ARTIFACT_VERSION = "neuroarc-task-logreg-v1";
+export const FEATURE_VERSION = "neuroarc-task-features-v2";
+export const ARTIFACT_VERSION = "neuroarc-task-logreg-v2";
 export const TRAINING_SCHEMA = "neuroarc-task-training-v1";
 export const FEATURE_NAMES = [
   "quiet",
@@ -15,13 +21,23 @@ export const FEATURE_NAMES = [
   "recent_accuracy",
   "log_condition_trials",
   "prior_response_seconds",
+  "difficulty_level",
+  "object_count",
+  "study_seconds",
+  "retention_seconds",
+  "retention_distraction",
+  "level_accuracy",
+  "log_level_trials",
 ];
 const CONDITIONS = ["quiet", "interruptions", "delay", "cues"];
 const eligible = (t) =>
   t.valid === true && !t.transfer && CONDITIONS.includes(t.condition);
 const meanAccuracy = (ts) =>
-  ts.length ? ts.reduce((sum, t) => sum + t.correct / 3, 0) / ts.length : 0.5;
-export function performanceFeatures(history, condition) {
+  ts.length
+    ? ts.reduce((sum, t) => sum + t.correct / itemCount(t), 0) / ts.length
+    : 0.5;
+export function performanceFeatures(history, condition, level = 1) {
+  const settings = difficultySettings(level, condition);
   if (!CONDITIONS.includes(condition)) throw Error("Unknown task condition.");
   const prior = history.filter(eligible),
     same = prior.filter((t) => t.condition === condition);
@@ -35,10 +51,17 @@ export function performanceFeatures(history, condition) {
     Math.log1p(prior.length),
     meanAccuracy(prior),
     meanAccuracy(same),
-    prior.length ? prior.at(-1).correct / 3 : 0.5,
+    prior.length ? prior.at(-1).correct / itemCount(prior.at(-1)) : 0.5,
     meanAccuracy(prior.slice(-5)),
     Math.log1p(same.length),
     median,
+    level,
+    settings.objectCount,
+    settings.studySeconds,
+    settings.retentionSeconds,
+    Number(settings.distraction),
+    meanAccuracy(prior.filter((t) => difficultyLevel(t) === level)),
+    Math.log1p(prior.filter((t) => difficultyLevel(t) === level).length),
   ];
 }
 function token(value, min, max) {
@@ -113,6 +136,8 @@ export function prepareTrainingDataset(exports) {
         answers: trial.answers,
         valid: trial.valid,
         transfer: trial.transfer,
+        difficultyLevel: difficultyLevel(trial),
+        distractionAnswers: trial.distractionAnswers,
       });
       const existing = seen.get(key);
       if (
@@ -123,7 +148,11 @@ export function prepareTrainingDataset(exports) {
         throw Error(
           "The same trial is assigned to different participants or has conflicting answers.",
         );
-      const features = performanceFeatures(history, trial.condition);
+      const features = performanceFeatures(
+        history,
+        trial.condition,
+        difficultyLevel(trial),
+      );
       if (existing) duplicates++;
       else {
         seen.set(key, { participant: data.participantKey, signature });
@@ -134,7 +163,13 @@ export function prepareTrainingDataset(exports) {
           session: data.sessionKey,
           condition: trial.condition,
           features,
-          target: trial.correct >= 2 ? 1 : 0,
+          difficultyLevel: difficultyLevel(trial),
+          objectCount: itemCount(trial),
+          protocolVersion: trial.protocolVersion,
+          selection: trial.selection,
+          reference: trial.reference,
+          distractionAnswers: trial.distractionAnswers,
+          target: taskSuccess(trial) ? 1 : 0,
           trialKey: key,
           source,
         });
@@ -149,7 +184,7 @@ export function prepareTrainingDataset(exports) {
   return {
     featureVersion: FEATURE_VERSION,
     featureNames: FEATURE_NAMES,
-    target: "recall_at_least_2_of_3",
+    target: "recall_at_least_two_thirds",
     dataKind: [...kinds][0],
     records,
     audit: {
@@ -166,7 +201,7 @@ export function validateTaskModel(raw) {
     raw?.schema !== ARTIFACT_VERSION ||
     raw.featureVersion !== FEATURE_VERSION ||
     raw.algorithm !== "standardized_logistic_regression" ||
-    raw.target !== "recall_at_least_2_of_3"
+    raw.target !== "recall_at_least_two_thirds"
   )
     throw Error("Unsupported supervised model or feature schema.");
   if (raw.dataKind !== "observed")
@@ -200,9 +235,23 @@ export function validateTaskModel(raw) {
     !Number.isFinite(Date.parse(raw.trainedAt)) ||
     !Array.isArray(raw.conditions) ||
     !raw.conditions.length ||
-    raw.conditions.some((c) => !CONDITIONS.includes(c))
+    raw.conditions.some((c) => !CONDITIONS.includes(c)) ||
+    !Array.isArray(raw.difficultyLevels) ||
+    !raw.difficultyLevels.length ||
+    raw.difficultyLevels.some((level) => ![1, 2, 3, 4].includes(level))
   )
     throw Error("Invalid model identity or training coverage.");
+  if (
+    !Array.isArray(raw.supportedTasks) ||
+    !raw.supportedTasks.length ||
+    raw.supportedTasks.length > 16 ||
+    raw.supportedTasks.some(
+      (task) =>
+        !raw.conditions.includes(task.condition) ||
+        !raw.difficultyLevels.includes(task.difficultyLevel),
+    )
+  )
+    throw Error("Explicit condition and difficulty coverage is required.");
   const e = raw.evaluation;
   if (
     e?.split !== "participant_holdout" ||
@@ -240,6 +289,11 @@ export function validateTaskModel(raw) {
     modelId: raw.modelId,
     trainedAt: raw.trainedAt,
     conditions: [...raw.conditions],
+    difficultyLevels: [...raw.difficultyLevels],
+    supportedTasks: raw.supportedTasks.map((task) => ({
+      condition: task.condition,
+      difficultyLevel: task.difficultyLevel,
+    })),
     coefficients: [...raw.coefficients],
     mean: [...raw.mean],
     scale: [...raw.scale],
@@ -263,9 +317,16 @@ export function validateTaskModel(raw) {
     },
   };
 }
-export function inferTaskModel(model, history, condition) {
-  if (!model.conditions.includes(condition)) return null;
-  const features = performanceFeatures(history, condition);
+export function inferTaskModel(model, history, condition, level = 1) {
+  if (
+    !model.conditions.includes(condition) ||
+    !model.difficultyLevels.includes(level) ||
+    !model.supportedTasks.some(
+      (task) => task.condition === condition && task.difficultyLevel === level,
+    )
+  )
+    return null;
+  const features = performanceFeatures(history, condition, level);
   const contributions = features.map(
     (x, i) => ((x - model.mean[i]) / model.scale[i]) * model.coefficients[i],
   );
@@ -276,6 +337,8 @@ export function inferTaskModel(model, history, condition) {
       : Math.exp(logit) / (1 + Math.exp(logit));
   return {
     modelId: model.modelId,
+    difficultyLevel: level,
+    objectCount: difficultySettings(level).objectCount,
     target: model.target,
     probability,
     historyTrials: history.filter(eligible).length,

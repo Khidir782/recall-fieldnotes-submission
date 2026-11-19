@@ -1,11 +1,18 @@
+import {
+  difficultyLevel,
+  difficultySettings,
+  itemCount,
+} from "./difficulty.js";
 // Recall Fieldnotes's online task-performance model. No disease or connectome inference.
-export const LEARNER_VERSION = "neuroarc-personal-beta-v1";
+export const LEARNER_VERSION = "neuroarc-personal-beta-v2";
 export const CONDITION_KEYS = ["quiet", "interruptions", "delay", "cues"];
 const PRIOR = { alpha: 2, beta: 2, trials: 0 };
 
-export function initialLearner() {
+export function initialLearner(level = 1) {
+  difficultySettings(level);
   return {
     version: LEARNER_VERSION,
+    difficultyLevel: level,
     conditions: Object.fromEntries(
       CONDITION_KEYS.map((key) => [key, { ...PRIOR }]),
     ),
@@ -21,7 +28,7 @@ function eligible(trial) {
     CONDITION_KEYS.includes(trial.condition) &&
     Number.isInteger(trial.correct) &&
     trial.correct >= 0 &&
-    trial.correct <= 3
+    trial.correct <= itemCount(trial)
   );
 }
 function fingerprint(previous, trial) {
@@ -33,11 +40,12 @@ function fingerprint(previous, trial) {
   return hash;
 }
 export function updateLearner(state, trial) {
-  if (!eligible(trial)) return state;
+  if (!eligible(trial) || difficultyLevel(trial) !== state.difficultyLevel)
+    return state;
   function update(parameters) {
     return {
       alpha: parameters.alpha + trial.correct,
-      beta: parameters.beta + 3 - trial.correct,
+      beta: parameters.beta + itemCount(trial) - trial.correct,
       trials: parameters.trials + 1,
     };
   }
@@ -52,8 +60,8 @@ export function updateLearner(state, trial) {
     fingerprint: fingerprint(state.fingerprint, trial),
   };
 }
-export function fitLearner(trials = []) {
-  return trials.reduce(updateLearner, initialLearner());
+export function fitLearner(trials = [], level = 1) {
+  return trials.reduce(updateLearner, initialLearner(level));
 }
 export function betaMean({ alpha, beta }) {
   return alpha / (alpha + beta);
@@ -88,13 +96,14 @@ export function betaInterval({ alpha, beta }) {
   }
   return { low: quantile(0.025), high: quantile(0.975) };
 }
-export function countProbabilities({ alpha, beta }) {
-  const denominator = (alpha + beta) * (alpha + beta + 1) * (alpha + beta + 2);
-  return [0, 1, 2, 3].map((k) => {
-    let numerator = [1, 3, 3, 1][k];
-    for (let i = 0; i < k; i++) numerator *= alpha + i;
-    for (let i = 0; i < 3 - k; i++) numerator *= beta + i;
-    return numerator / denominator;
+export function countProbabilities({ alpha, beta }, n = 3) {
+  return Array.from({ length: n + 1 }, (_, k) => {
+    let probability = 1;
+    for (let i = 0; i < n; i++) probability /= alpha + beta + i;
+    for (let i = 0; i < k; i++)
+      probability *= ((alpha + i) * (n - i)) / (i + 1);
+    for (let i = 0; i < n - k; i++) probability *= beta + i;
+    return probability;
   });
 }
 export function predictTrial(state, condition) {
@@ -104,38 +113,46 @@ export function predictTrial(state, condition) {
   return {
     version: LEARNER_VERSION,
     condition,
+    difficultyLevel: state.difficultyLevel,
+    objectCount: difficultySettings(state.difficultyLevel).objectCount,
     probability: betaMean(parameters),
-    expectedCorrect: 3 * betaMean(parameters),
+    expectedCorrect:
+      difficultySettings(state.difficultyLevel).objectCount *
+      betaMean(parameters),
     interval: betaInterval(parameters),
-    countProbabilities: countProbabilities(parameters),
+    countProbabilities: countProbabilities(
+      parameters,
+      difficultySettings(state.difficultyLevel).objectCount,
+    ),
     baselineProbability: betaMean(state.pooled),
     trainingTrials: state.trainingTrials,
     conditionTrials: parameters.trials,
     historyFingerprint: state.fingerprint,
   };
 }
-function varianceGain(parameters) {
-  const outcomes = countProbabilities(parameters);
+function varianceGain(parameters, n = 3) {
+  const outcomes = countProbabilities(parameters, n);
   const expectedAfter = outcomes.reduce(
     (sum, p, k) =>
       sum +
       p *
         betaVariance({
           alpha: parameters.alpha + k,
-          beta: parameters.beta + 3 - k,
+          beta: parameters.beta + n - k,
         }),
     0,
   );
   return Math.max(0, betaVariance(parameters) - expectedAfter);
 }
-export function recommendPersonal(trials) {
-  const state = fitLearner(trials);
+export function recommendPersonal(trials, level = 1) {
+  const state = fitLearner(trials, level);
+  const n = difficultySettings(level).objectCount;
   const candidates = ["interruptions", "delay", "cues"].map((condition) => ({
     condition,
     count: state.conditions[condition].trials,
     uncertaintyReduction:
-      varianceGain(state.conditions.quiet) +
-      varianceGain(state.conditions[condition]),
+      varianceGain(state.conditions.quiet, n) +
+      varianceGain(state.conditions[condition], n),
     prediction: predictTrial(state, condition),
   }));
   const least = Math.min(...candidates.map((c) => c.count));
@@ -153,8 +170,10 @@ export function recommendPersonal(trials) {
   };
 }
 export function reconstructPredictions(trials) {
-  let state = initialLearner();
+  const states = new Map();
   return trials.map((trial) => {
+    const level = difficultyLevel(trial);
+    const state = states.get(level) || initialLearner(level);
     const prediction = trial.transfer
       ? null
       : {
@@ -162,30 +181,32 @@ export function reconstructPredictions(trials) {
           provenance: "reconstructed",
           issuedAt: null,
         };
-    state = updateLearner(state, trial);
+    states.set(level, updateLearner(state, trial));
     return { ...trial, prediction };
   });
 }
-export function brierError(probability, correct) {
+export function brierError(probability, correct, n = 3) {
   return (
-    (correct * (1 - probability) ** 2 + (3 - correct) * probability ** 2) / 3
+    (correct * (1 - probability) ** 2 + (n - correct) * probability ** 2) / n
   );
 }
-export function logLoss(probability, correct) {
+export function logLoss(probability, correct, n = 3) {
   const p = Math.max(1e-12, Math.min(1 - 1e-12, probability));
-  return -(correct * Math.log(p) + (3 - correct) * Math.log1p(-p)) / 3;
+  return -(correct * Math.log(p) + (n - correct) * Math.log1p(-p)) / n;
 }
-export function evaluateLearner(trials) {
-  let state = initialLearner();
+export function evaluateLearner(trials, level = 1) {
+  let state = initialLearner(level);
   const rows = [];
   for (let i = 0; i < trials.length; i++) {
     const trial = trials[i];
-    if (!eligible(trial)) continue;
+    if (!eligible(trial) || difficultyLevel(trial) !== level) continue;
     const expected = predictTrial(state, trial.condition),
       stored = trial.prediction;
     const consistent =
       stored?.version === LEARNER_VERSION &&
       stored.condition === trial.condition &&
+      stored.difficultyLevel === level &&
+      stored.objectCount === itemCount(trial) &&
       stored.historyFingerprint === state.fingerprint &&
       stored.trainingTrials === state.trainingTrials &&
       Number.isFinite(stored.probability) &&
@@ -207,15 +228,28 @@ export function evaluateLearner(trials) {
       trialIndex: i,
       condition: trial.condition,
       correct: trial.correct,
+      objectCount: itemCount(trial),
       probability: prediction.probability,
       expectedCorrect: prediction.expectedCorrect,
       baselineProbability: prediction.baselineProbability,
       trainingTrials: prediction.trainingTrials,
       provenance: live ? "live" : "reconstructed",
-      brier: brierError(prediction.probability, trial.correct),
-      baselineBrier: brierError(prediction.baselineProbability, trial.correct),
-      logLoss: logLoss(prediction.probability, trial.correct),
-      baselineLogLoss: logLoss(prediction.baselineProbability, trial.correct),
+      brier: brierError(
+        prediction.probability,
+        trial.correct,
+        itemCount(trial),
+      ),
+      baselineBrier: brierError(
+        prediction.baselineProbability,
+        trial.correct,
+        itemCount(trial),
+      ),
+      logLoss: logLoss(prediction.probability, trial.correct, itemCount(trial)),
+      baselineLogLoss: logLoss(
+        prediction.baselineProbability,
+        trial.correct,
+        itemCount(trial),
+      ),
     });
     state = updateLearner(state, trial);
   }
@@ -238,8 +272,9 @@ export function learnerMetadata() {
   return {
     version: LEARNER_VERSION,
     method:
-      "Independent beta-binomial recall-rate learner by condition; Beta(2,2) priors, item-count updates",
-    baseline: "Pooled Beta(2,2) learner ignoring condition",
+      "Independent beta-binomial learner by difficulty and condition; Beta(2,2) priors, variable item-count updates",
+    baseline:
+      "Beta(2,2) learner pooled across conditions within the same difficulty",
     evaluation:
       "Predict before each trial, score completed valid live predictions, then update. Imported history is reconstructed and reported separately.",
     scheduler:

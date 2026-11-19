@@ -1,3 +1,12 @@
+import {
+  DIFFICULTIES,
+  difficultyLevel,
+  difficultySettings,
+  itemCount,
+  progression,
+  distractionNumber,
+  validateDistraction,
+} from "./difficulty.js";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
@@ -66,6 +75,10 @@ function saveJSON(name, data) {
 
 export default function ExperimentLab() {
   const [taskModel, setTaskModel] = useState(null);
+  const [difficultyChoice, setDifficultyChoice] = useState("auto");
+  const [resultLevel, setResultLevel] = useState(1);
+  const [distractionAnswers, setDistractionAnswers] = useState([]);
+  const distractionRef = useRef([]);
   const [pairPlan, setPairPlan] = useState(null),
     [page, setPage] = useState("experiment"),
     [trials, setTrials] = useState([]),
@@ -87,11 +100,32 @@ export default function ExperimentLab() {
     itemStart = useRef(0),
     invalidRef = useRef(false),
     fileRef = useRef(null);
+  const progress = useMemo(() => progression(trials), [trials]);
+  const upcomingLevel =
+    difficultyChoice === "auto" ? progress.nextLevel : Number(difficultyChoice);
+  const shownLevel =
+    trial && phase !== "ready" ? difficultyLevel(trial) : upcomingLevel;
+  const shownSettings = difficultySettings(
+    shownLevel,
+    trial && phase !== "ready" ? trial.condition : "quiet",
+  );
   const post = useMemo(() => posterior(trials), [trials]);
-  const personalState = useMemo(() => fitLearner(trials), [trials]);
-  const evaluation = useMemo(() => evaluateLearner(trials), [trials]);
-  const next = useMemo(() => recommendPersonal(trials), [trials]);
-  const stats = useMemo(() => summarize(trials), [trials]);
+  const personalState = useMemo(
+    () => fitLearner(trials, resultLevel),
+    [trials, resultLevel],
+  );
+  const evaluation = useMemo(
+    () => evaluateLearner(trials, resultLevel),
+    [trials, resultLevel],
+  );
+  const next = useMemo(
+    () => recommendPersonal(trials, upcomingLevel),
+    [trials, upcomingLevel],
+  );
+  const stats = useMemo(
+    () => summarize(trials, resultLevel),
+    [trials, resultLevel],
+  );
   const valid = trials.filter((t) => t.valid && !t.transfer),
     probe = trials.filter((t) => t.valid && t.transfer),
     totalCorrect = valid.reduce((s, t) => s + t.correct, 0);
@@ -115,8 +149,8 @@ export default function ExperimentLab() {
   }, []);
   const leader = post.mass.indexOf(Math.max(...post.mass));
   const adequate =
-    valid.length >= 6 &&
-    stats.filter((s) => s.trials >= 2).length >= 2 &&
+    valid.filter((t) => difficultyLevel(t) === 1).length >= 6 &&
+    summarize(trials, 1).filter((s) => s.trials >= 2).length >= 2 &&
     post.mass[leader] > 0.6;
   useEffect(() => {
     if (active && (methods || page !== "experiment")) {
@@ -134,7 +168,12 @@ export default function ExperimentLab() {
   }, [notice]);
   useEffect(() => {
     if (phase !== "encode" && phase !== "delay") return;
-    const seconds = phase === "encode" ? 8 : CONDITIONS[trial.condition].delay;
+    const settings = difficultySettings(
+      difficultyLevel(trial),
+      trial.condition,
+    );
+    const seconds =
+      phase === "encode" ? settings.studySeconds : settings.retentionSeconds;
     startTime.current = performance.now();
     setRemaining(seconds);
     const tick = setInterval(() => {
@@ -168,13 +207,13 @@ export default function ExperimentLab() {
     const prediction = t.transfer
       ? null
       : Object.freeze({
-          ...predictTrial(personalState, t.condition),
+          ...predictTrial(fitLearner(trials, difficultyLevel(t)), t.condition),
           issuedAt: new Date().toISOString(),
           provenance: "live",
         });
     const supervisedPrediction =
       taskModel && !t.transfer
-        ? inferTaskModel(taskModel, trials, t.condition)
+        ? inferTaskModel(taskModel, trials, t.condition, difficultyLevel(t))
         : null;
     setTrial({
       ...t,
@@ -183,6 +222,8 @@ export default function ExperimentLab() {
         ? { ...supervisedPrediction, issuedAt: new Date().toISOString() }
         : null,
     });
+    setDistractionAnswers([]);
+    distractionRef.current = [];
     setPrompt(0);
     setAnswers([]);
     setInvalid(false);
@@ -203,7 +244,11 @@ export default function ExperimentLab() {
       return;
     }
     const pairId = Math.max(0, ...trials.map((t) => t.pairId)) + 1;
-    const pair = makePair(freshSeed(), next.condition, pairId);
+    const pair = makePair(freshSeed(), next.condition, pairId, {
+      difficultyLevel: upcomingLevel,
+      selection: difficultyChoice === "auto" ? "adaptive" : "manual",
+      reference: difficultyChoice === "auto" && progress.reference,
+    });
     setPairPlan({
       condition: next.condition,
       uncertaintyReduction: next.uncertaintyReduction,
@@ -225,13 +270,14 @@ export default function ExperimentLab() {
       { room, elapsedMs: Math.round(performance.now() - itemStart.current) },
     ];
     setAnswers(nextAnswers);
-    if (prompt < 2) {
+    if (prompt < trial.placements.length - 1) {
       setPrompt((p) => p + 1);
       itemStart.current = performance.now();
     } else {
       const record = {
         ...trial,
         answers: nextAnswers,
+        distractionAnswers: validateDistraction(trial, distractionRef.current),
         correct: scoreAnswers(trial, nextAnswers),
         valid: !invalidRef.current,
         invalidReason: invalidRef.current
@@ -241,6 +287,7 @@ export default function ExperimentLab() {
         source: "live",
       };
       setTrials((ts) => [...ts, record]);
+      setResultLevel(difficultyLevel(record));
       setLast(record);
       setPhase("result");
     }
@@ -303,9 +350,45 @@ export default function ExperimentLab() {
     () =>
       phase !== "ready" && trial
         ? trial.prediction
-        : predictTrial(personalState, queue[0]?.condition || next.condition),
-    [phase, trial, personalState, queue, next.condition],
+        : predictTrial(
+            fitLearner(trials, upcomingLevel),
+            queue[0]?.condition || next.condition,
+          ),
+    [phase, trial, trials, upcomingLevel, queue, next.condition],
   );
+  const distractionIndex =
+    phase === "delay" && trial
+      ? Math.min(
+          Math.ceil(shownSettings.retentionSeconds / 3) - 1,
+          Math.floor(
+            Math.max(0, shownSettings.retentionSeconds - remaining) / 3,
+          ),
+        )
+      : 0;
+  function answerDistraction(answer) {
+    if (
+      phase !== "delay" ||
+      !shownSettings.distraction ||
+      distractionRef.current.some((a) => a.index === distractionIndex)
+    )
+      return;
+    const elapsed = performance.now() - startTime.current;
+    const index = Math.min(
+      Math.ceil(shownSettings.retentionSeconds / 3) - 1,
+      Math.floor(elapsed / 3000),
+    );
+    if (
+      index !== distractionIndex ||
+      elapsed >= shownSettings.retentionSeconds * 1000
+    )
+      return;
+    const nextAnswers = [
+      ...distractionRef.current,
+      { index, answer, elapsedMs: Math.round(elapsed - index * 3000) },
+    ];
+    distractionRef.current = nextAnswers;
+    setDistractionAnswers(nextAnswers);
+  }
   const distracted =
     phase === "encode" &&
     trial?.condition === "interruptions" &&
@@ -370,7 +453,7 @@ export default function ExperimentLab() {
               </h1>
               <p>
                 {page === "experiment"
-                  ? "Study three objects. Then put them back where you remember them."
+                  ? "Study the objects. Then put them back where you remember them."
                   : page === "evidence"
                     ? "See how your recall changes with time, interruptions, and cues."
                     : "Review your answers and pick up where you left off."}
@@ -401,9 +484,14 @@ export default function ExperimentLab() {
                 <strong>{valid.length}</strong>
               </div>
               <div>
-                <span>Recall accuracy</span>
+                <span>Recall accuracy · mixed levels</span>
                 <strong>
-                  {Math.round((totalCorrect / (valid.length * 3)) * 100)}%
+                  {Math.round(
+                    (totalCorrect /
+                      valid.reduce((s, t) => s + itemCount(t), 0)) *
+                      100,
+                  )}
+                  %
                 </strong>
               </div>
               <div>
@@ -433,6 +521,49 @@ export default function ExperimentLab() {
                       </span>
                     )}
                   </div>
+                  <div className="difficulty-controls">
+                    <label htmlFor="practice-difficulty">
+                      Practice difficulty
+                    </label>
+                    <select
+                      id="practice-difficulty"
+                      value={difficultyChoice}
+                      disabled={active || queue.length > 0}
+                      onChange={(e) => {
+                        setDifficultyChoice(e.target.value);
+                        setTrial(null);
+                        setLast(null);
+                        setPhase("ready");
+                      }}
+                    >
+                      <option value="auto">Automatic progression</option>
+                      {DIFFICULTIES.map((d) => (
+                        <option key={d.level} value={d.level}>
+                          Level {d.level} · {d.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p>
+                      Level {shownLevel} · {shownSettings.objectCount} objects ·{" "}
+                      {shownSettings.studySeconds}s study ·{" "}
+                      {shownSettings.delaySeconds}s wait (+6s for the delay
+                      comparison)
+                      {shownSettings.distraction
+                        ? " · even/odd task during the wait"
+                        : ""}
+                      .
+                    </p>
+                    <small>
+                      {trial?.reference ||
+                      (!trial &&
+                        difficultyChoice === "auto" &&
+                        progress.reference)
+                        ? "Reference comparison: original three-object task."
+                        : difficultyChoice === "auto"
+                          ? "Two comparisons at 80% or above raise the level; 40% or below lowers it. Every fourth comparison is a level-one reference."
+                          : "Chosen level: these rounds train the model but do not change automatic progression."}
+                    </small>
+                  </div>
                   <div
                     className="stage-instructions"
                     role="status"
@@ -456,12 +587,12 @@ export default function ExperimentLab() {
                         {phase === "ready"
                           ? "Remember where each object belongs"
                           : phase === "encode"
-                            ? "Study the three object locations."
+                            ? `Study the ${shownSettings.objectCount} object locations.`
                             : phase === "delay"
                               ? "Hold the locations in mind."
                               : phase === "recall"
                                 ? `Where was the ${trial.placements[prompt].object.toLowerCase()}?`
-                                : `${last.correct} of 3 locations recalled${last.valid ? "" : " · excluded"}`}
+                                : `${last.correct} of ${itemCount(last)} locations recalled${last.valid ? "" : " · excluded"}`}
                       </strong>
                       <p>
                         {phase === "ready"
@@ -469,9 +600,9 @@ export default function ExperimentLab() {
                           : phase === "encode"
                             ? `Eight seconds of study${trial.condition === "interruptions" ? " with irrelevant visual notifications" : ""}.`
                             : phase === "delay"
-                              ? `Recall begins after a ${CONDITIONS[trial.condition].delay}-second interval.`
+                              ? `Recall begins after ${shownSettings.retentionSeconds} seconds.${shownSettings.distraction ? " Answer even or odd while waiting." : ""}`
                               : phase === "recall"
-                                ? `Select a room · object ${prompt + 1} of 3${trial.condition === "cues" ? " · three candidate rooms" : ""}`
+                                ? `Select a room · object ${prompt + 1} of ${shownSettings.objectCount}${trial.condition === "cues" ? " · three candidate rooms" : ""}`
                                 : last.valid
                                   ? "Your answers and response times are recorded in History."
                                   : "Task visibility was interrupted. This result will not update the model."}
@@ -498,14 +629,53 @@ export default function ExperimentLab() {
                       phase={phase}
                       onChoose={choose}
                       prompt={prompt}
+                      objectCount={shownSettings.objectCount}
                     />
                     {phase === "delay" && (
                       <div className="delay-cover" role="status">
-                        <span className="delay-rings">
-                          <Clock size={25} />
-                        </span>
-                        <strong>Retention interval</strong>
-                        <p>Recall will begin automatically.</p>
+                        {shownSettings.distraction ? (
+                          <div className="retention-task">
+                            <h3>Is this number even or odd?</h3>
+                            <strong
+                              className="distraction-number"
+                              aria-live="polite"
+                            >
+                              {distractionNumber(trial.seed, distractionIndex)}
+                            </strong>
+                            <div>
+                              {["even", "odd"].map((answer) => (
+                                <button
+                                  key={answer}
+                                  className="lab-secondary"
+                                  onClick={() => answerDistraction(answer)}
+                                  disabled={distractionAnswers.some(
+                                    (a) => a.index === distractionIndex,
+                                  )}
+                                >
+                                  {answer === "even" ? "Even" : "Odd"}
+                                </button>
+                              ))}
+                            </div>
+                            <p role="status">
+                              {distractionAnswers.some(
+                                (a) => a.index === distractionIndex,
+                              )
+                                ? "Answer recorded. Wait for the next number."
+                                : "A new number appears every three seconds."}
+                            </p>
+                            <small>
+                              Your object-location recall begins automatically.
+                            </small>
+                          </div>
+                        ) : (
+                          <>
+                            <span className="delay-rings">
+                              <Clock size={25} />
+                            </span>
+                            <strong>Hold the locations in mind</strong>
+                            <p>Recall will begin automatically.</p>
+                          </>
+                        )}
                       </div>
                     )}
                     {distracted && (
@@ -524,6 +694,19 @@ export default function ExperimentLab() {
                       trial will be excluded; finish for practice or discard it.
                     </p>
                   )}
+                  {phase === "result" &&
+                    difficultySettings(difficultyLevel(last)).distraction && (
+                      <p className="distraction-summary">
+                        Even/odd task:{" "}
+                        {
+                          last.distractionAnswers.filter((a) => a.correct)
+                            .length
+                        }{" "}
+                        correct from {last.distractionAnswers.length} answers ·{" "}
+                        {Math.ceil(last.settings.retentionSeconds / 3)} numbers
+                        presented. Unanswered numbers are recorded as missed.
+                      </p>
+                    )}
                   {phase === "result" && (
                     <div className="trial-feedback">
                       {last.placements.map((p, i) => (
@@ -624,15 +807,15 @@ export default function ExperimentLab() {
                     {active && trial?.transfer
                       ? "This alternate layout does not update the hypotheses. Compare it separately with apartment observations."
                       : active || queue.length
-                        ? "Two rounds, one change. Both use three objects and the same study time."
+                        ? `Two rounds at level ${shownLevel}. Both use ${shownSettings.objectCount} objects and the same study time.`
                         : "Try two rounds with one change between them. We vary interruptions, waiting time, or location cues."}
                   </p>
                   <div className="design-chips">
                     <span>
-                      <Clock size={12} /> 8s study
+                      <Clock size={12} /> {shownSettings.studySeconds}s study
                     </span>
                     <span>
-                      <Target size={12} /> 3 objects
+                      <Target size={12} /> {shownSettings.objectCount} objects
                     </span>
                     <span>
                       <RotateCcw size={12} /> Random order
@@ -706,6 +889,19 @@ export default function ExperimentLab() {
                 <div className="lab-card-head">
                   <div>
                     <h2>Recall by condition</h2>
+                    <label className="results-level">
+                      Difficulty level{" "}
+                      <select
+                        value={resultLevel}
+                        onChange={(e) => setResultLevel(Number(e.target.value))}
+                      >
+                        {DIFFICULTIES.map((d) => (
+                          <option key={d.level} value={d.level}>
+                            Level {d.level} · {d.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   </div>
                 </div>
                 <div className="condition-bars">
@@ -835,7 +1031,7 @@ export default function ExperimentLab() {
                   <section className="lab-card hypotheses-list">
                     <div className="lab-card-head">
                       <div>
-                        <h2>Fixed comparison hypotheses</h2>
+                        <h2>Fixed comparison hypotheses · level one only</h2>
                       </div>
                     </div>
                     {HYPOTHESES.map((h, i) => (
@@ -875,7 +1071,9 @@ export default function ExperimentLab() {
                     {probe.map((p, i) => (
                       <div key={i}>
                         <span>Courtyard probe {i + 1}</span>
-                        <strong>{p.correct}/3</strong>
+                        <strong>
+                          {p.correct}/{itemCount(p)}
+                        </strong>
                         <small>
                           {i === 0
                             ? "First alternate-layout exposure"
@@ -986,7 +1184,18 @@ export default function ExperimentLab() {
                                 </small>
                               </td>
                               <td>
-                                {CONDITIONS[t.condition].name}
+                                {CONDITIONS[t.condition].name} · Level{" "}
+                                {difficultyLevel(t)}
+                                <small>
+                                  {itemCount(t)} objects ·{" "}
+                                  {
+                                    difficultySettings(
+                                      difficultyLevel(t),
+                                      t.condition,
+                                    ).retentionSeconds
+                                  }
+                                  s wait{t.reference ? " · reference" : ""}
+                                </small>
                                 <small>
                                   {t.transfer
                                     ? "Courtyard recall"
@@ -994,14 +1203,21 @@ export default function ExperimentLab() {
                                 </small>
                               </td>
                               <td>
-                                <strong>{t.correct}/3</strong>
+                                <strong>
+                                  {t.correct}/{itemCount(t)}
+                                </strong>
                                 <small>
                                   {t.prediction
-                                    ? `${t.prediction.expectedCorrect.toFixed(1)}/3 expected · ${t.prediction.provenance === "live" ? "recorded forecast" : "reconstructed"}`
+                                    ? `${t.prediction.expectedCorrect.toFixed(1)}/${itemCount(t)} expected · ${t.prediction.provenance === "live" ? "recorded forecast" : "reconstructed"}`
                                     : "Separate probe"}
                                 </small>
                               </td>
-                              <td>{(times[1] / 1000).toFixed(2)}s</td>
+                              <td>
+                                {(
+                                  times[Math.floor(times.length / 2)] / 1000
+                                ).toFixed(2)}
+                                s
+                              </td>
                               <td>
                                 <span
                                   className={`journal-status ${!t.valid ? "excluded" : t.transfer ? "probe" : ""}`}
@@ -1082,8 +1298,8 @@ export default function ExperimentLab() {
             </button>
             <h2>{CONDITIONS[inspected.condition].name}</h2>
             <p>
-              Seed {inspected.seed} · {inspected.correct}/3 correct ·{" "}
-              {inspected.source}
+              Seed {inspected.seed} · {inspected.correct}/{itemCount(inspected)}{" "}
+              correct · {inspected.source}
             </p>
             <Floorplan trial={inspected} phase="inspect" inspect prompt={0} />
             <div className="route-answers">

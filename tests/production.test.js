@@ -506,6 +506,48 @@ test("expiry filters reads before cleanup and deletions cascade", async (t) => {
       0,
     );
 });
+test("progressive rounds survive canonical cloud saving and permissioned training export", async (t) => {
+  const ctx = await setup(t),
+    a = await ctx.user(),
+    id = await session(ctx, a);
+  const base = makeTrial(42, "delay", { difficultyLevel: 4 });
+  const data = {
+    ...base,
+    valid: true,
+    correct: 99,
+    source: "live",
+    completedAt: new Date().toISOString(),
+    settings: { retentionSeconds: 0 },
+    answers: base.placements.map((p) => ({ room: p.room, elapsedMs: 1000 })),
+    distractionAnswers: [
+      { index: 0, answer: "even", elapsedMs: 500, correct: "forged" },
+    ],
+  };
+  const written = await save(ctx, a, id, crypto.randomUUID(), 0, data);
+  assert.equal(written.response.status, 201);
+  const restored = (
+    await (await ctx.call(`/sessions/${id}`, { user: a })).json()
+  ).data.trials[0];
+  assert.equal(restored.correct, 5);
+  assert.equal(restored.settings.retentionSeconds, 18);
+  assert.equal(typeof restored.distractionAnswers[0].correct, "boolean");
+  await ctx.call(`/sessions/${id}/research-permission`, {
+    method: "PUT",
+    user: a,
+    body: { granted: true, version: "task-training-permission-v1" },
+  });
+  const response = await ctx.call("/admin/training-export", {
+    method: "POST",
+    admin: ctx.admin,
+    body: { sessionIds: [id] },
+  });
+  assert.equal(response.status, 200);
+  const bundle = await response.json();
+  const dataset = prepareTrainingDataset(bundle.exports);
+  assert.equal(dataset.records[0].difficultyLevel, 4);
+  assert.equal(dataset.records[0].objectCount, 5);
+  assert.equal(dataset.records[0].target, 1);
+});
 test("rate limiting rejects excess writes and unconfigured service fails closed", async (t) => {
   const ctx = await setup(t);
   await rateLimit(ctx.db, "isolated", 1);

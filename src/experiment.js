@@ -1,3 +1,10 @@
+import {
+  difficultySettings,
+  difficultyLevel,
+  itemCount,
+  PROTOCOL_VERSION,
+  validateDistraction,
+} from "./difficulty.js";
 import { reconstructPredictions, learnerMetadata } from "./personalModel.js";
 
 // Versioned, explicit experimental assumptions. Not a model of brain disease.
@@ -95,15 +102,35 @@ export function shuffle(values, rng) {
 export function makeTrial(
   seed,
   condition,
-  { transfer = false, pairId = 0, order = 0 } = {},
+  {
+    transfer = false,
+    pairId = 0,
+    order = 0,
+    difficultyLevel: level = 1,
+    selection = "manual",
+    reference = false,
+  } = {},
 ) {
   if (!Object.hasOwn(CONDITIONS, condition) || !Number.isInteger(seed))
     throw Error("Invalid trial configuration");
+  if (transfer && level !== 1) throw Error("Courtyard probes use level one.");
+  if (
+    !["manual", "adaptive"].includes(selection) ||
+    typeof reference !== "boolean" ||
+    (reference && (level !== 1 || selection !== "adaptive"))
+  )
+    throw Error("Invalid difficulty selection.");
+  const settings = difficultySettings(level, condition);
   const rng = random(seed);
-  const objects = shuffle(OBJECTS, rng).slice(0, 3),
-    rooms = shuffle([0, 1, 2, 3, 4, 5], rng).slice(0, 3);
+  const objects = shuffle(OBJECTS, rng).slice(0, settings.objectCount),
+    rooms = shuffle([0, 1, 2, 3, 4, 5], rng).slice(0, settings.objectCount);
   return {
     seed,
+    protocolVersion: PROTOCOL_VERSION,
+    difficultyLevel: level,
+    settings,
+    selection,
+    reference,
     condition,
     transfer,
     pairId,
@@ -150,7 +177,7 @@ export function entropy(mass) {
 export function posterior(trials = []) {
   let weights = states.map(() => 1 / states.length);
   for (const t of trials) {
-    if (!t.valid || t.transfer) continue;
+    if (!t.valid || t.transfer || difficultyLevel(t) !== 1) continue;
     const next = weights.map(
       (w, i) =>
         w * binomial(t.correct, 3, successProbability(states[i], t.condition)),
@@ -200,18 +227,24 @@ export function recommend(trials) {
       : "Start with an informative matched comparison; all four hypotheses have equal prior weight.",
   };
 }
-export function makePair(seed, contrast, pairId) {
+export function makePair(seed, contrast, pairId, options = {}) {
   const order = shuffle(["quiet", contrast], random(seed ^ 0xa531));
   return order.map((condition, i) =>
-    makeTrial((seed + i * 7919) >>> 0, condition, { pairId, order: i }),
+    makeTrial((seed + i * 7919) >>> 0, condition, {
+      ...options,
+      pairId,
+      order: i,
+    }),
   );
 }
-export function summarize(trials) {
-  const valid = trials.filter((t) => t.valid && !t.transfer);
+export function summarize(trials, level = 1) {
+  const valid = trials.filter(
+    (t) => t.valid && !t.transfer && difficultyLevel(t) === level,
+  );
   return Object.entries(CONDITIONS).map(([id, c]) => {
     const ts = valid.filter((t) => t.condition === id);
     const correct = ts.reduce((s, t) => s + t.correct, 0),
-      n = ts.length * 3;
+      n = ts.reduce((s, t) => s + itemCount(t), 0);
     let low = 0,
       high = 1;
     if (n) {
@@ -238,7 +271,7 @@ export function summarize(trials) {
 }
 export function scoreAnswers(trial, answers) {
   if (
-    answers.length !== 3 ||
+    answers.length !== trial.placements.length ||
     answers.some(
       (a) =>
         !Number.isInteger(a.room) ||
@@ -282,16 +315,37 @@ export function importSession(raw) {
       !Number.isFinite(Date.parse(t.completedAt))
     )
       throw Error("Invalid trial metadata.");
+    if (
+      t.protocolVersion !== undefined &&
+      t.protocolVersion !== PROTOCOL_VERSION
+    )
+      throw Error("Unsupported task protocol.");
+    if (
+      t.difficultyLevel !== undefined &&
+      (t.protocolVersion !== PROTOCOL_VERSION ||
+        ![1, 2, 3, 4].includes(t.difficultyLevel))
+    )
+      throw Error("Difficulty requires versioned task settings.");
     const canonical = makeTrial(t.seed, t.condition, {
       transfer: t.transfer,
       pairId: t.pairId,
       order: t.order,
+      difficultyLevel: t.difficultyLevel ?? 1,
+      selection: t.selection ?? "manual",
+      reference: t.reference ?? false,
     });
-    if (!Array.isArray(t.answers) || t.answers.length !== 3)
+    if (
+      !Array.isArray(t.answers) ||
+      t.answers.length !== canonical.placements.length
+    )
       throw Error("Invalid trial answers.");
     const correct = scoreAnswers(canonical, t.answers);
     return {
       ...canonical,
+      distractionAnswers: validateDistraction(
+        canonical,
+        t.distractionAnswers ?? [],
+      ),
       answers: t.answers.map((a) => ({ room: a.room, elapsedMs: a.elapsedMs })),
       correct,
       valid: t.valid,
@@ -305,6 +359,7 @@ export function importSession(raw) {
 export function sessionExport(trials) {
   return {
     modelVersion: MODEL_VERSION,
+    protocolVersion: PROTOCOL_VERSION,
     personalLearner: learnerMetadata(),
     exportedAt: new Date().toISOString(),
     source: "browser task observations; imported records marked individually",
@@ -313,10 +368,10 @@ export function sessionExport(trials) {
       baselineGrid: BASELINES,
       prior: "Uniform over 4 hypotheses × 3 baseline levels",
       likelihood:
-        "Binomial with 3 conditionally independent item responses per trial; within-session dependencies and practice effects are not modeled",
+        "Fixed hypotheses use level-one trials only. Progressive learner uses variable item counts separately by difficulty; item independence is an approximation",
       effects: HYPOTHESES.map((h) => ({ id: h.id, effect: h.effect })),
       scheduler:
-        "Personal learner: expected reduction in recall-rate posterior variance, coverage-constrained, randomized within-pair order",
+        "Difficulty-stratified personal learner; progressive load with fixed level-one reference pairs; randomized within-pair order",
       transfer: "Excluded from posterior updates and scheduling",
     },
     limitations: [

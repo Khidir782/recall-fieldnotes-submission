@@ -1,8 +1,11 @@
+import { difficultyLevel } from "../difficulty.js";
 import React from "react";
 import { HYPOTHESES } from "../experiment";
 
 export default function EvidenceGraph({ trials, mass }) {
-  const valid = trials.filter((t) => t.valid && !t.transfer);
+  const valid = trials.filter(
+    (t) => t.valid && !t.transfer && difficultyLevel(t) === 1,
+  );
   return (
     <div
       className="evidence-graph-scroll"

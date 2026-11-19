@@ -33,8 +33,12 @@ export function ForecastCard({ prediction, result, locked }) {
         {percent(prediction.probability)} <small>per object</small>
       </strong>
       <p>
-        Expected recall: <b>{prediction.expectedCorrect.toFixed(1)} of 3</b>.
-        Model interval: {percent(prediction.interval.low)}–
+        Expected recall:{" "}
+        <b>
+          {prediction.expectedCorrect.toFixed(1)} of{" "}
+          {prediction.objectCount ?? 3}
+        </b>
+        . Model interval: {percent(prediction.interval.low)}–
         {percent(prediction.interval.high)}.
       </p>
       <p>
@@ -46,7 +50,7 @@ export function ForecastCard({ prediction, result, locked }) {
           <CheckCircle2 size={16} />
           <span>
             {result.valid
-              ? `Observed ${result.correct} of 3. Learner updated after scoring.`
+              ? `Observed ${result.correct} of ${result.placements.length}. Learner updated after scoring.`
               : "Excluded result. Learner not updated."}
           </span>
         </div>
@@ -81,8 +85,8 @@ export default function PersonalLearner({ state, evaluation, onMethods }) {
         <div>
           <h2 id="personal-learner-title">Recall by condition</h2>
           <p className="learner-intro">
-            Estimates based on your completed rounds. Wider intervals mean more
-            uncertainty.
+            Level {state.difficultyLevel} estimates only. Wider intervals mean
+            more uncertainty.
           </p>
         </div>
         <span className="lab-tag">
@@ -123,7 +127,7 @@ export default function PersonalLearner({ state, evaluation, onMethods }) {
           <p>
             Every live forecast is scored against the subsequent answers before
             training on that trial. The baseline learns one recall rate across
-            all conditions.
+            conditions at the same difficulty.
           </p>
         </div>
         <div className="learner-score-grid">
@@ -174,10 +178,12 @@ export default function PersonalLearner({ state, evaluation, onMethods }) {
                     <td>{row.trialIndex + 1}</td>
                     <td>{CONDITIONS[row.condition].short}</td>
                     <td>
-                      {row.expectedCorrect.toFixed(1)}/3
+                      {row.expectedCorrect.toFixed(1)}/{row.objectCount}
                       <small>{percent(row.probability)} per object</small>
                     </td>
-                    <td>{row.correct}/3</td>
+                    <td>
+                      {row.correct}/{row.objectCount}
+                    </td>
                     <td>{row.brier.toFixed(3)}</td>
                     <td>
                       {row.provenance === "live"

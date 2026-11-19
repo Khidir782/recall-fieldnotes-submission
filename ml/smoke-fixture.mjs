@@ -17,6 +17,7 @@ for (let person = 0; person < 8; person++) {
     const trial = makeTrial(seed, condition, {
       pairId: Math.floor(index / 2) + 1,
       order: index % 2,
+      difficultyLevel: 1 + Math.floor(index / 4),
     });
     const p = { quiet: 0.85, interruptions: 0.25, delay: 0.45, cues: 0.75 }[
       condition

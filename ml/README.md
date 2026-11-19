@@ -4,9 +4,11 @@ This pipeline fits a regularized **logistic regression** model with scikit-learn
 
 ## Target and features
 
-The binary target is **recall at least two of three objects on the upcoming apartment trial**. The browser and dataset builder share `src/taskPerformance.js` and the versioned feature list:
+The binary target is **recall at least two thirds of the objects on the upcoming apartment trial, rounded up (2/3, 3/4, 4/5)**. The browser and dataset builder share `src/taskPerformance.js` and the versioned feature list:
 
 - Four task-condition indicators.
+- Prescribed difficulty, object count, study seconds, retention seconds and retention distraction setting.
+- Prior same-difficulty accuracy and log trial count.
 - Log count of prior valid trials and prior same-condition trials.
 - Overall, same-condition, latest and last-five-trial recall accuracy.
 - Upper median response time (seconds, capped at 60) from preceding valid trials, or zero before any observations.
@@ -36,7 +38,7 @@ Reports compare held-out Brier error, log loss and AUROC with a training-prior `
 
 Outputs:
 
-- `artifacts/pilot/task-model.json`: portable weights, training-only scaling/ranges, ordered feature schema, condition coverage, model identity, dataset hash, and pilot holdout metrics. No participant keys or raw answers are included.
+- `artifacts/pilot/task-model.json`: portable weights, training-only scaling/ranges, ordered feature schema, condition/difficulty coverage (`supportedTasks`), model identity, dataset hash, and pilot holdout metrics. No participant keys or raw answers are included.
 - `artifacts/pilot/evaluation.json`: local audit report with split participant keys and held-out predictions. Keep this report private.
 
 `data/` and `artifacts/` are Git-ignored. No model file is automatically uploaded or published.
@@ -50,6 +52,12 @@ node scripts/release-model.mjs artifacts/pilot/task-model.json --reviewed
 ```
 
 The release gate rejects synthetic artifacts and requires lower held-out Brier error and log loss than the baseline; it does not establish generalization or scientific validity. Commit only the resulting `public/models/current.json` and deploy the reviewed source. The participant app automatically loads compatible weights and freezes each forecast before study; raw datasets and private evaluation reports are not bundled. No model is published automatically and no participant-trained artifact is included yet. Restored history reconstructs forecasts; weights stay fixed until a reviewed replacement is deployed. See [production handoff](../docs/PRODUCTION.md).
+
+## Progressive protocol compatibility
+
+The feature and artifact schemas are now `neuroarc-task-features-v2` and `neuroarc-task-logreg-v2`. Old three-object session/training exports still import as level one; old fitted v1 artifacts must be retrained. Each training record retains protocol, difficulty, automatic/manual selection, reference status and distraction answers. These current-trial answers are audit data, never features for predicting that trial. Missing even/odd responses remain missed; protocol assignment alone does not establish engagement.
+
+The Bayesian learner keeps condition estimates separate by level. The supervised model uses normalized prior accuracy and prescribed task settings. The private evaluation report includes model/baseline errors by difficulty (`byDifficulty`); per-level AUC is null if only one outcome occurs. The smoke fixture spans all four levels. These checks do not validate progression thresholds or cognitive benefit. See [protocol details](../docs/DIFFICULTY.md).
 
 ## Synthetic pipeline smoke test
 

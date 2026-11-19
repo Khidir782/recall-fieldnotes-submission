@@ -31,21 +31,44 @@ export default function Methods({ close }) {
         </p>
         <h3>Experimental design</h3>
         <p>
-          Each pair compares quiet recall with one changed factor: irrelevant
-          visual notifications during the eight-second study period, a
-          nine-second rather than three-second retention interval, or three
-          candidate locations rather than six at recall. Load is always three
-          objects. Pair order is seeded and randomized. Routes differ between
-          trials; unequal route difficulty, practice and carryover remain
+          Each pair compares quiet recall with one changed condition: visual
+          notifications during study, six extra seconds of retention, or three
+          candidate rooms instead of six. Within a pair, object count, study
+          time and difficulty are fixed; order is seeded and randomized. Routes
+          differ, so unequal route difficulty, practice and carryover remain
           possible confounds.
+        </p>
+        <h3>Progressive difficulty</h3>
+        <p>
+          All levels use eight seconds of study. Level one has three objects and
+          a three-second base delay; level two has four objects and six seconds;
+          level three has five objects and nine seconds; level four has five
+          objects and twelve seconds. The longer-delay condition adds six
+          seconds to each level. Level four also presents a seeded even/odd
+          number task every three seconds during retention. Responses, mistakes
+          and missed numbers are recorded separately; participation is not
+          independently verified. Current distraction responses are not inputs
+          to the pre-trial prediction.
+        </p>
+        <p>
+          Automatic progression requires two completed valid comparisons at 80%
+          accuracy or above to raise the level; a comparison at 40% or below
+          lowers it. Every fourth completed automatic comparison returns to
+          level one as a reference. These thresholds are design choices, not
+          validated ability bands. Manually chosen levels train the learner but
+          do not change automatic progression. Incomplete or invalid pairs do
+          not advance it. Several task settings change across levels, so a
+          difference between levels cannot identify the effect of one factor.
         </p>
         <h3>Supervised task-performance model</h3>
         <p>
           The separate supervised pipeline fits regularized logistic-regression
           weights offline with scikit-learn. Its target is task success: at
-          least two of three objects recalled. Inputs are the task condition and
-          preceding valid-trial accuracy, counts and response times.
-          Current-trial answers and timings are excluded.
+          least two thirds of the objects recalled, rounded up: 2/3, 3/4 or 4/5.
+          Inputs include condition, prescribed object count, study duration,
+          retention duration, distraction setting, and preceding valid-trial
+          accuracy, counts and response times. Current-trial answers and timings
+          are excluded.
         </p>
         <p>
           Permission-recorded training exports use one anonymous key per
@@ -61,21 +84,21 @@ export default function Methods({ close }) {
         <p>
           A compatible observed-data JSON artifact can be loaded locally. Its
           weights and preprocessing run in the browser; each supported trial
-          records a forecast before study. Unsupported conditions are skipped
-          and out-of-range features are flagged. Weights stay fixed until
-          retraining offline and loading a replacement. Artifact provenance is
-          self-attested, not independently certified. Synthetic smoke-test
-          artifacts cannot activate in the app. This model is separate from both
-          the Bayesian learner and the fixed hypotheses.
+          records a forecast before study. Unsupported conditions or difficulty
+          levels are skipped and out-of-range features are flagged. Weights stay
+          fixed until retraining offline and loading a replacement. Artifact
+          provenance is self-attested, not independently certified. Synthetic
+          smoke-test artifacts cannot activate in the app. This model is
+          separate from both the Bayesian learner and the fixed hypotheses.
         </p>
         <h3>Personal recall learner</h3>
         <p>
-          The personal learner estimates four separate per-object recall rates.
-          Each starts with a Beta(2,2) prior: mean 50%, with broad uncertainty.
-          After a valid three-object trial, correct answers are added to alpha
-          and incorrect answers to beta for that condition. This changes the
-          learned parameters; no fixed interruption penalty or cue benefit is
-          imposed.
+          The personal learner estimates separate per-object recall rates for
+          each condition at each difficulty level. Each starts with a Beta(2,2)
+          prior: mean 50%, with broad uncertainty. After a valid trial, correct
+          answers are added to alpha and incorrect answers to beta for that
+          condition. This changes the learned parameters; no fixed interruption
+          penalty or cue benefit is imposed.
         </p>
         <p>
           The displayed intervals are approximate 95% beta model intervals,
@@ -88,11 +111,11 @@ export default function Methods({ close }) {
         <p>
           Before study begins, the app records the condition forecast,
           training-history fingerprint, model version, timestamp and a
-          pooled-baseline forecast. Those forecasts stay fixed through all three
+          pooled-baseline forecast. Those forecasts stay fixed through all
           answers. Valid live forecasts are scored against the subsequent
           answers with mean per-item Brier error and log loss. Lower is better.
           The pooled baseline uses the same Beta(2,2) prior but learns one rate
-          across all conditions.
+          across conditions at the same difficulty.
         </p>
         <p>
           Evaluation is sequential on adaptively selected tasks, not an
@@ -106,8 +129,9 @@ export default function Methods({ close }) {
         </p>
         <h3>Separate fixed comparison hypotheses</h3>
         <p>
-          Each hypothesis is combined with baseline item-success probabilities
-          of 45%, 65% and 85%. All twelve states start equally weighted. The
+          Only level-one apartment trials update these fixed hypotheses. Each
+          hypothesis is combined with baseline item-success probabilities of
+          45%, 65% and 85%. All twelve states start equally weighted. The
           likelihood assumes three conditionally independent item responses per
           trial. An interruption or delay hypothesis applies a fixed −20
           percentage-point effect; the cue hypothesis applies +15 points. These
@@ -122,14 +146,14 @@ export default function Methods({ close }) {
         </p>
         <h3>How the next pair is chosen</h3>
         <p>
-          The personal learner enumerates the four possible correct counts for
-          each condition using its beta-binomial predictive distribution. It
-          selects the quiet/contrast pair with the greatest expected reduction
-          in the sum of recall-rate posterior variances. A coverage constraint
-          limits candidates to within one valid trial of the least-tested
-          contrast; order is randomized. The old fixed-hypothesis entropy
-          scheduler remains in the source for reference and tests but does not
-          choose live tasks.
+          The personal learner enumerates the possible correct counts at the
+          selected difficulty for each condition using its beta-binomial
+          predictive distribution. It selects the quiet/contrast pair with the
+          greatest expected reduction in the sum of recall-rate posterior
+          variances. A coverage constraint limits candidates to within one valid
+          trial of the least-tested contrast; order is randomized. The old
+          fixed-hypothesis entropy scheduler remains in the source for reference
+          and tests but does not choose live tasks.
         </p>
         <h3>Checks and separate probes</h3>
         <p>
@@ -138,8 +162,8 @@ export default function Methods({ close }) {
           be repeated. Alternate-layout probes are displayed separately and
           excluded from both model updates and scheduling. A probe is not proof
           of real-world transfer. Item-level accuracy intervals in the evidence
-          view assume independent responses; three items in a trial are not
-          truly independent observations.
+          view assume independent responses; items in a trial are not truly
+          independent observations.
         </p>
         <h3>Saving, privacy, and research permission</h3>
         <p>

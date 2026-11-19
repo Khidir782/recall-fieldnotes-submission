@@ -1727,3 +1727,66 @@ summary::-webkit-details-marker {
     font-size: 32px;
   }
 }
+
+.difficulty-controls {
+  padding: 16px 22px;
+  border-bottom: 1px solid #dadce0;
+}
+.difficulty-controls label,
+.results-level {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 14px;
+  color: #3c4043;
+}
+.difficulty-controls select,
+.results-level select {
+  padding: 9px 12px;
+  margin: 8px 0;
+  max-width: 100%;
+  font: inherit;
+  color: #202124;
+  background: #fff;
+  border: 1px solid #9aa0a6;
+  border-radius: 6px;
+}
+.difficulty-controls p,
+.difficulty-controls small {
+  display: block;
+  margin: 6px 0;
+  color: #3c4043;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.retention-task {
+  padding: 20px;
+  max-width: 100%;
+  text-align: center;
+}
+.retention-task h3 {
+  font-size: 18px;
+  margin: 0 0 16px;
+}
+.retention-task .distraction-number {
+  display: block;
+  font-size: 48px;
+  font-variant-numeric: tabular-nums;
+  margin: 14px 0;
+}
+.retention-task > div {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+.retention-task .lab-secondary {
+  min-width: 88px;
+  min-height: 44px;
+}
+.retention-task p,
+.retention-task small {
+  display: block;
+  font-size: 14px;
+  line-height: 1.6;
+}

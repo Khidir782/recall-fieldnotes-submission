@@ -30,7 +30,14 @@ export function ObjectIcon({ name, size = 20 }) {
   const Icon = icons[name] || MapPin;
   return <Icon size={size} strokeWidth={1.7} />;
 }
-export function Floorplan({ trial, phase, onChoose, prompt, inspect = false }) {
+export function Floorplan({
+  trial,
+  phase,
+  onChoose,
+  prompt,
+  inspect = false,
+  objectCount = 3,
+}) {
   const transfer = trial?.transfer;
   const labels = transfer ? courtyard : ROOMS;
   const order = transfer ? [2, 5, 1, 4, 0, 3] : [0, 1, 2, 3, 4, 5];
@@ -87,7 +94,7 @@ export function Floorplan({ trial, phase, onChoose, prompt, inspect = false }) {
         <span>
           {transfer
             ? "An alternate arrangement · first probe is unfamiliar"
-            : "Three objects · six possible locations"}
+            : `${trial?.placements.length ?? objectCount} objects · six possible locations`}
         </span>
       </div>
     </div>

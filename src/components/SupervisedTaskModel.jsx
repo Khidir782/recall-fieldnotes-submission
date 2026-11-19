@@ -1,3 +1,4 @@
+import { itemCount, taskSuccess } from "../difficulty.js";
 import React, { useRef, useState } from "react";
 import { Download, Upload, Brain, Info, X } from "lucide-react";
 import { CONDITIONS } from "../experiment.js";
@@ -130,7 +131,7 @@ export default function SupervisedTaskModel({
           <h2>Supervised task-performance model</h2>
           <p className="learner-intro">
             A separate model fitted offline to a participant dataset. Target:
-            recall at least two of three objects.
+            recall at least two thirds of the objects (rounded up).
           </p>
         </div>
         <span className="lab-tag">
@@ -266,21 +267,21 @@ export function SupervisedForecast({
         <>
           <p className="supervised-probability">
             {Math.round(prediction.probability * 100)}%{" "}
-            <span>chance of recalling ≥2/3</span>
+            <span>chance of recalling at least two thirds</span>
           </p>
           <p>
             Model {prediction.modelId}. Forecast recorded before this trial.
           </p>
           {prediction.outsideTrainingRange && (
             <p>
-              Some prior-history features are outside this model's training
-              range. Treat this forecast cautiously.
+              Some task or prior-history features are outside this model's
+              training range. Treat this forecast cautiously.
             </p>
           )}
           {result && (
             <p>
               {result.valid
-                ? `Observed task ${result.correct >= 2 ? "success" : "failure"} (${result.correct}/3). Fitted weights were not changed.`
+                ? `Observed task ${taskSuccess(result) ? "success" : "failure"} (${result.correct}/${itemCount(result)}). Fitted weights were not changed.`
                 : "Excluded result; not used for evaluation."}
             </p>
           )}
