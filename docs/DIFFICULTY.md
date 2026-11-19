@@ -31,7 +31,7 @@ Even/odd responses are descriptive secondary-task observations. A missed number 
 
 ## Reviewer walkthrough and release
 
-1. Select level four from Practice difficulty and start a comparison.
+1. Select level four from Difficulty and start a comparison.
 2. Study five objects, answer even/odd questions during retention, then place all five objects.
 3. Complete the second round. Inspect five-object feedback, secondary-task summary, and Results filtered to level four.
 4. Expand prediction checks to see level-specific forecasts and baseline error. In History, inspect the level, object count, wait duration and recorded route.

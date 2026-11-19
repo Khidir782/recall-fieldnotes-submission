@@ -232,9 +232,13 @@ export default function ExperimentLab() {
     setPhase("encode");
     setLast(null);
     setPage("experiment");
-    requestAnimationFrame(() =>
-      stageRef.current?.scrollIntoView({ block: "start", behavior: "auto" }),
-    );
+    requestAnimationFrame(() => {
+      const stage = stageRef.current;
+      if (!stage) return;
+      const bounds = stage.getBoundingClientRect();
+      if (bounds.top < 0 || bounds.bottom > window.innerHeight)
+        stage.scrollIntoView({ block: "start", behavior: "auto" });
+    });
   }
   function startPair() {
     if (trials.length > 498) {
@@ -405,7 +409,7 @@ export default function ExperimentLab() {
       </div>
     );
   return (
-    <div className="lab-app">
+    <div className={`lab-app${active ? " is-playing" : ""}`}>
       <header className="site-header">
         <a
           className="lab-brand"
@@ -446,14 +450,14 @@ export default function ExperimentLab() {
             <div>
               <h1>
                 {page === "experiment"
-                  ? "Test your recall."
+                  ? "Recall practice"
                   : page === "evidence"
                     ? "Your results."
                     : "Your history."}
               </h1>
               <p>
                 {page === "experiment"
-                  ? "Study the objects. Then put them back where you remember them."
+                  ? "Remember objects and their locations across short rounds."
                   : page === "evidence"
                     ? "See how your recall changes with time, interruptions, and cues."
                     : "Review your answers and pick up where you left off."}
@@ -477,7 +481,7 @@ export default function ExperimentLab() {
               </button>
             )}
           </div>
-          {valid.length > 0 && (
+          {valid.length > 0 && page !== "experiment" && (
             <div className="lab-metrics" aria-label="Your progress">
               <div>
                 <span>Completed rounds</span>
@@ -516,53 +520,57 @@ export default function ExperimentLab() {
                       <span className="lab-tag">
                         <span />
                         {trial
-                          ? `${CONDITIONS[trial.condition].short}${trial.transfer ? " · courtyard" : ` · round ${trial.order + 1} of 2`}`
+                          ? `Level ${shownLevel} · ${CONDITIONS[trial.condition].short}${trial.transfer ? " · courtyard" : ` · round ${trial.order + 1} of 2`}`
                           : "Ready"}
                       </span>
                     )}
                   </div>
                   <div className="difficulty-controls">
-                    <label htmlFor="practice-difficulty">
-                      Practice difficulty
-                    </label>
-                    <select
-                      id="practice-difficulty"
-                      value={difficultyChoice}
-                      disabled={active || queue.length > 0}
-                      onChange={(e) => {
-                        setDifficultyChoice(e.target.value);
-                        setTrial(null);
-                        setLast(null);
-                        setPhase("ready");
-                      }}
-                    >
-                      <option value="auto">Automatic progression</option>
-                      {DIFFICULTIES.map((d) => (
-                        <option key={d.level} value={d.level}>
-                          Level {d.level} · {d.name}
+                    <div className="difficulty-picker">
+                      <label htmlFor="practice-difficulty">Difficulty</label>
+                      <select
+                        id="practice-difficulty"
+                        value={difficultyChoice}
+                        disabled={active || queue.length > 0}
+                        onChange={(e) => {
+                          setDifficultyChoice(e.target.value);
+                          setTrial(null);
+                          setLast(null);
+                          setPhase("ready");
+                        }}
+                      >
+                        <option value="auto">
+                          Automatic · Level {progress.nextLevel}
                         </option>
-                      ))}
-                    </select>
-                    <p>
-                      Level {shownLevel} · {shownSettings.objectCount} objects ·{" "}
-                      {shownSettings.studySeconds}s study ·{" "}
-                      {shownSettings.delaySeconds}s wait (+6s for the delay
-                      comparison)
-                      {shownSettings.distraction
-                        ? " · even/odd task during the wait"
-                        : ""}
-                      .
-                    </p>
-                    <small>
-                      {trial?.reference ||
-                      (!trial &&
-                        difficultyChoice === "auto" &&
-                        progress.reference)
-                        ? "Reference comparison: original three-object task."
-                        : difficultyChoice === "auto"
-                          ? "Two comparisons at 80% or above raise the level; 40% or below lowers it. Every fourth comparison is a level-one reference."
-                          : "Chosen level: these rounds train the model but do not change automatic progression."}
-                    </small>
+                        {DIFFICULTIES.map((d) => (
+                          <option key={d.level} value={d.level}>
+                            Level {d.level} · {d.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div
+                      className="difficulty-facts"
+                      aria-label="Round settings"
+                    >
+                      <span>
+                        <Target size={14} />
+                        {shownSettings.objectCount} objects
+                      </span>
+                      <span>
+                        <Eye size={14} />
+                        {shownSettings.studySeconds}s study
+                      </span>
+                      <span>
+                        <Clock size={14} />
+                        {shownSettings.retentionSeconds}s wait
+                      </span>
+                      {shownSettings.distraction && <span>Even/odd task</span>}
+                      {(trial?.reference ||
+                        (!trial &&
+                          difficultyChoice === "auto" &&
+                          progress.reference)) && <span>Reference round</span>}
+                    </div>
                   </div>
                   <div
                     className="stage-instructions"
@@ -585,7 +593,7 @@ export default function ExperimentLab() {
                     <div>
                       <strong>
                         {phase === "ready"
-                          ? "Remember where each object belongs"
+                          ? "Study, wait, then recall"
                           : phase === "encode"
                             ? `Study the ${shownSettings.objectCount} object locations.`
                             : phase === "delay"
@@ -596,7 +604,7 @@ export default function ExperimentLab() {
                       </strong>
                       <p>
                         {phase === "ready"
-                          ? "You’ll have eight seconds to study the room."
+                          ? "Select Start practice when you’re ready."
                           : phase === "encode"
                             ? `Eight seconds of study${trial.condition === "interruptions" ? " with irrelevant visual notifications" : ""}.`
                             : phase === "delay"
@@ -807,20 +815,9 @@ export default function ExperimentLab() {
                     {active && trial?.transfer
                       ? "This alternate layout does not update the hypotheses. Compare it separately with apartment observations."
                       : active || queue.length
-                        ? `Two rounds at level ${shownLevel}. Both use ${shownSettings.objectCount} objects and the same study time.`
-                        : "Try two rounds with one change between them. We vary interruptions, waiting time, or location cues."}
+                        ? `Two rounds at level ${shownLevel}, with one changed condition.`
+                        : "Two rounds at the same level, with one changed condition. The order is randomized."}
                   </p>
-                  <div className="design-chips">
-                    <span>
-                      <Clock size={12} /> {shownSettings.studySeconds}s study
-                    </span>
-                    <span>
-                      <Target size={12} /> {shownSettings.objectCount} objects
-                    </span>
-                    <span>
-                      <RotateCcw size={12} /> Random order
-                    </span>
-                  </div>
                   <details className="prediction-details">
                     <summary>
                       Recall estimates <ChevronRight size={15} />
@@ -839,6 +836,21 @@ export default function ExperimentLab() {
                         onManage={() => setMethods(true)}
                       />
                     )}
+                  </details>
+                  <details className="practice-settings-details">
+                    <summary>
+                      Difficulty & progression <ChevronRight size={15} />
+                    </summary>
+                    <p>
+                      {difficultyChoice === "auto"
+                        ? "Two completed comparisons at 80% or above raise the level. A comparison at 40% or below lowers it. Every fourth automatic comparison returns to level one as a reference."
+                        : "This level is chosen manually. Valid rounds update recall estimates at this level and do not change automatic progression."}
+                    </p>
+                    <p>
+                      The longer-delay comparison adds six seconds to the base
+                      wait. Level four includes even/odd questions during
+                      retention.
+                    </p>
                   </details>
                   <details className="scheduler-details">
                     <summary>
